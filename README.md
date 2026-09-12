@@ -1,62 +1,124 @@
-# FreshBox
+# FreshBox integrated app
 
-MicroPython firmware for Raspberry Pi Pico 2 W, an SCD41, and the same
-Waveshare 3.7-inch 280 x 480 e-paper used in the previous e-bike project.
+This folder contains the complete application:
 
-Copy the five application files from `firmware/` to the Pico's filesystem root, keep
-`aioble` installed, and restart the board:
+- `freshbox-backend`: FastAPI, SQLite, BLE receiver, freshness records, and Grok integration.
+- `freshbox-frontend`: Next.js UI and thin server-side proxy routes.
+- `freshbox-frontend/firmware/pico_scd41.py`: matching Pico 2 W BLE firmware.
 
-- `main.py`: starts sensor polling, BLE, and the display worker on core 1.
-- `scd41.py`: I2C measurements, data-ready checks, and CRC validation.
-- `ble.py`: FreshPod advertising and the existing sensor notification packet.
-- `display.py`: temperature (C), humidity (% RH), and CO2 (ppm) dashboard.
-- `epaper_driver.py`: reused Waveshare driver with explicit SPI pins and a
-  30-second BUSY timeout. Original license retained.
+The Python backend is the single source of truth. Sensor notifications and UI actions are stored in SQLite; the frontend no longer writes a separate JSON database.
 
-## Wiring
+## Fastest start on Windows
 
-| Device signal | Pico GPIO |
-| --- | --- |
-| SCD41 SCL | GP21 |
-| SCD41 SDA | GP20 |
-| E-paper CLK | GP10 |
-| E-paper DIN / MOSI | GP11 |
-| E-paper CS | GP9 |
-| E-paper DC | GP8 |
-| E-paper RST | GP12 |
-| E-paper BUSY | GP13 |
+Install Python 3.11+, Node.js 20+, and npm. Then open PowerShell in this folder and run:
 
-Use the same display power and ground connections as the previous project.
-SPI1 reserves GP28 as its unused MISO input; the display does not need a
-MISO wire. The SCD41 uses I2C0 at 100 kHz, address 0x62.
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\start-dev.ps1
+```
 
-Measurements arrive approximately every five seconds. The display checks
-for changed readings every five seconds after each refresh, so it may lag
-by a refresh cycle. Every twelfth changed frame uses a full refresh to
-reduce ghosting; adjust `FULL_REFRESH_EVERY` in `display.py` if needed.
-Startup and sensor failures show `--` instead of fabricated measurements.
-Readings older than 20 seconds are hidden. Display errors are printed to
-the serial console while sensor polling and BLE continue.
+The first run installs dependencies. Open http://localhost:43123 when Next.js says it is ready. Stop both servers with `Ctrl+C`.
 
-BLE retains the existing service/characteristic UUIDs and 11-byte `<BIHhH`
-packet: version, sequence, CO2 ppm, temperature x100, humidity x100.
+The default configuration uses seeded demo boxes and a simulated baseline sensor reading, so the UI works before the Pico is connected.
 
-## On-device check
+## Fastest start on macOS/Linux
 
-After copying all files and restarting, check the serial console for
-`SCD41 ready` and measured values. Confirm the screen shows those values
-with the correct units and the BLE client still receives readings.
-Disconnecting the sensor should produce `Sensor error` with blank values;
-reconnecting it should allow readings to recover automatically.
+```bash
+chmod +x start-dev.sh
+./start-dev.sh
+```
 
-Display initialization and the startup dashboard run on the main core before
-the display worker starts. The console prints each initialization stage and
-full tracebacks on display errors.
+Then open http://localhost:43123.
 
-For a blank display, confirm the console prints `FreshBox: main.py starting`.
-If it does not, verify that the updated files are saved on the Pico, not only
-on the computer, and run `main.py` using the Pico MicroPython interpreter in
-Thonny. To isolate the display, stop the running program with Thonny's Stop
-button, then run the optional `firmware/display_test.py` on the Pico. It uses
-no BLE or sensor and should display fixed test values: 23.5 C, 45.0 % RH,
-800 ppm. Report the last console message if the screen stays white.
+## Manual start
+
+Terminal 1 — backend:
+
+```bash
+cd freshbox-backend
+python -m venv .venv
+```
+
+Activate it on Windows:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Or on macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Then:
+
+```bash
+pip install -e ".[dev]"
+python -m uvicorn app.main:app --reload --port 8000 --env-file .env
+```
+
+Terminal 2 — frontend:
+
+```bash
+cd freshbox-frontend
+npm ci
+npm run dev
+```
+
+Useful URLs:
+
+- App: http://localhost:43123
+- Backend health: http://localhost:8000/health
+- Interactive backend API: http://localhost:8000/docs
+
+## Connect the Pico 2 W over BLE
+
+1. Flash a current MicroPython build for Raspberry Pi Pico 2 W.
+2. Install `aioble` on the Pico (`mpremote mip install aioble`, or use Thonny's package manager).
+3. Wire SCD41 `VIN -> 3V3`, `GND -> GND`, `SDA -> GP4`, and `SCL -> GP5`.
+4. Copy `freshbox-frontend/firmware/pico_scd41.py` to the Pico as `main.py`.
+5. In `freshbox-backend/.env`, change `ENABLE_BLE=false` to `ENABLE_BLE=true`.
+6. Make sure Bluetooth is enabled on the computer running the backend, restart `start-dev`, and keep the Pico within BLE range.
+
+The Pico advertises as `FreshBox` and sends an 11-byte notification every five seconds. The backend stores each reading in `freshbox-backend/freshbox.db`. The dashboard refreshes from that database every two seconds. When a real reading arrives, the device line on the dashboard changes from source `demo` to `ble`.
+
+## Grok
+
+Add your key only to `freshbox-backend/.env`:
+
+```text
+XAI_API_KEY=your-key-here
+```
+
+Restart the servers. The frontend sends Grok requests through FastAPI, so the key is never exposed to browser JavaScript. Without a key, the Grok screen uses its built-in local fallback.
+
+## Configuration
+
+Backend (`freshbox-backend/.env`):
+
+- `ENABLE_BLE`: subscribe to the Pico (`false` for UI-only development).
+- `DEMO_MODE`: seed demo boxes/readings when the database is empty.
+- `BLE_DEVICE_NAME`: must match the firmware (`FreshBox`).
+- `BLE_POD_ID`: database ID for the sensor container.
+- `XAI_API_KEY`: optional Grok key.
+
+Frontend (`freshbox-frontend/.env.local`):
+
+- `FRESHBOX_API_URL`: backend URL, normally `http://127.0.0.1:8000`.
+
+Do not commit `.env`, `.env.local`, or `freshbox.db`.
+
+## Verify changes
+
+```bash
+cd freshbox-backend
+python -m pytest -q
+
+cd ../freshbox-frontend
+npm run lint
+npm run build
+```
+
+FreshBox is a prototype freshness indicator, not a certified food-safety device.
+

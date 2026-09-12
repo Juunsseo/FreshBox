@@ -10,7 +10,10 @@ render_dashboard(epd.image1Gray, {
     "humidity": 45.0,
     "co2": 800,
     "status": "DISPLAY TEST",
+    "food_name": "Strawberries",
+    "freshness": 76.5,
+    "food_status": 2,
 })
 epd.EPD_3IN7_1Gray_Display_Part(epd.buffer_1Gray)
 time.sleep(5)
-print("E-paper test complete: expect 23.5 C, 45.0 % RH, 800 ppm")
+print("Expect Strawberries, a 76.5% bar, and small sensor values at the bottom")

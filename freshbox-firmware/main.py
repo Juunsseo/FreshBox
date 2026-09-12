@@ -6,7 +6,7 @@ import asyncio
 import sys
 from machine import I2C, Pin
 
-from ble import ble_update, peripheral_task
+from ble import ble_update, peripheral_task, food_state_task
 from display import display_worker, initialize_display, update_readings
 from scd41 import SCD41
 
@@ -47,7 +47,7 @@ async def main():
     except Exception as error:
         print("E-paper startup failed:", error)
         sys.print_exception(error)
-    await asyncio.gather(sensor_task(), peripheral_task())
+    await asyncio.gather(sensor_task(), peripheral_task(), food_state_task())
 
 
 asyncio.run(main())
